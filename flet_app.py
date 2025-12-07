@@ -142,6 +142,7 @@ class AssemblyApp:
 
     def start_assembly(self):
         self.page.clean()
+        self.is_review_mode = False
         self.build_assembly_ui()
         self.update_item_display()
 
@@ -165,16 +166,16 @@ class AssemblyApp:
         # --- Main Card ---
         self.location_text = ft.Text("-", size=60, weight=ft.FontWeight.BOLD, color=self.COLOR_ACCENT)
         self.name_text = ft.Text("-", size=18, text_align=ft.TextAlign.CENTER, color=self.COLOR_TEXT)
-        self.barcode_text = ft.Text("-", size=24, font_family="monospace", color=self.COLOR_PRIMARY)
-        self.quantity_text = ft.Text("-", size=80, weight=ft.FontWeight.BOLD, color=self.COLOR_SUCCESS)
+        self.barcode_text = ft.Text("-", size=60, weight=ft.FontWeight.BOLD, color=self.COLOR_PRIMARY)
+        self.quantity_text = ft.Text("-", size=60, weight=ft.FontWeight.BOLD, color=self.COLOR_SUCCESS)
         
         main_card = ft.Container(
             content=ft.Column(
                 [
+                    self.name_text,
+                    ft.Divider(color=self.COLOR_BG),
                     ft.Text("ЯЧЕЙКА", size=12, color=self.COLOR_TEXT_SEC),
                     self.location_text,
-                    ft.Divider(color=self.COLOR_BG),
-                    self.name_text,
                     ft.Container(height=10),
                     ft.Text("ШТРИХКОД", size=12, color=self.COLOR_TEXT_SEC),
                     self.barcode_text,
@@ -275,7 +276,9 @@ class AssemblyApp:
             self.name_text.value = item['name']
             
             barcode = item.get('barcode', '')
-            self.barcode_text.value = f"...{barcode[-4:]}" if len(barcode) >= 4 else barcode
+            # Show last 4 digits, remove leading dots if any
+            display_barcode = barcode[-4:] if len(barcode) >= 4 else barcode
+            self.barcode_text.value = display_barcode.lstrip('.')
             
             self.quantity_text.value = str(item['quantity'])
             
@@ -346,7 +349,7 @@ class AssemblyApp:
                 self.page.close(self.qty_dialog)
                 
                 # Если мы в режиме обзора, обновляем таблицу
-                if hasattr(self, 'review_table'):
+                if getattr(self, 'is_review_mode', False):
                     self.build_review_ui()
                 else:
                     self.update_item_display()
@@ -374,6 +377,7 @@ class AssemblyApp:
 
     def build_review_ui(self):
         self.page.clean()
+        self.is_review_mode = True
         
         # --- Header ---
         header = ft.Container(
@@ -412,7 +416,7 @@ class AssemblyApp:
                 ft.DataRow(
                     cells=[
                         ft.DataCell(ft.Icon(status_icon, color=status_color)),
-                        ft.DataCell(ft.Text(item['name'], width=150, no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS)),
+                        # ft.DataCell(ft.Text(item['name'], width=150, no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS)), # Removed as requested
                         ft.DataCell(ft.Text(item.get('location', '-'))),
                         ft.DataCell(ft.Text(str(item['quantity']))),
                         ft.DataCell(ft.Text(str(item['collected_quantity']), color=status_color, weight=ft.FontWeight.BOLD)),
@@ -425,7 +429,7 @@ class AssemblyApp:
         self.review_table = ft.DataTable(
             columns=[
                 ft.DataColumn(ft.Text("Статус")),
-                ft.DataColumn(ft.Text("Товар")),
+                # ft.DataColumn(ft.Text("Товар")), # Removed
                 ft.DataColumn(ft.Text("Ячейка")),
                 ft.DataColumn(ft.Text("План")),
                 ft.DataColumn(ft.Text("Факт")),
@@ -515,7 +519,7 @@ class AssemblyApp:
             content = [
                 ft.Icon(ft.Icons.CHECK_CIRCLE, size=100, color=self.COLOR_SUCCESS),
                 ft.Text("Сборка завершена!", size=30, weight=ft.FontWeight.BOLD, color=self.COLOR_TEXT),
-                ft.Text(f"Файл сохранен:\n{Path(output_filename).name}", size=16, color=self.COLOR_TEXT_SEC, text_align=ft.TextAlign.CENTER),
+                ft.Text(f"Файл сохранен:\n{Path(output_filename).absolute()}", size=16, color=self.COLOR_TEXT_SEC, text_align=ft.TextAlign.CENTER),
                 ft.Container(height=20),
                 ft.ElevatedButton("В главное меню", on_click=lambda _: self.init_ui())
             ]
