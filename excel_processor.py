@@ -137,11 +137,12 @@ class ExcelProcessor:
 class ExcelWriter:
     """Класс для генерации итогового Excel-файла."""
 
-    def __init__(self, collected_data: List[Dict], shipment_info: str, discrepancies: List[str], original_file_path: str):
+    def __init__(self, collected_data: List[Dict], shipment_info: str, discrepancies: List[str], original_file_path: str, output_directory: str = None):
         self.collected_data = collected_data
         self.shipment_info = shipment_info
         self.discrepancies = discrepancies
         self.original_file_path = Path(original_file_path)
+        self.output_directory = Path(output_directory) if output_directory else self.original_file_path.parent
 
     def generate_final_file(self) -> str:
         """
@@ -202,7 +203,10 @@ class ExcelWriter:
         # Генерируем имя выходного файла
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
         output_filename = self.original_file_path.stem + f"_сборка_{timestamp}.xlsx"
-        output_path = self.original_file_path.parent / output_filename
+        
+        # Создаем папку если не существует
+        self.output_directory.mkdir(parents=True, exist_ok=True)
+        output_path = self.output_directory / output_filename
         
         wb.save(output_path)
         return str(output_path)

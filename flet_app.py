@@ -30,6 +30,7 @@ class AssemblyApp:
         self.current_box = 1
         self.shipment_info = ""
         self.input_file_path = ""
+        self.output_directory = str(Path.home() / "Download")  # Default to Downloads folder
 
         # --- UI Components ---
         self.file_picker = ft.FilePicker(on_result=self.on_file_picked)
@@ -37,6 +38,9 @@ class AssemblyApp:
         
         self.save_file_picker = ft.FilePicker(on_result=self.on_save_file_picked)
         self.page.overlay.append(self.save_file_picker)
+        
+        self.folder_picker = ft.FilePicker(on_result=self.on_folder_picked)
+        self.page.overlay.append(self.folder_picker)
 
         self.init_ui()
 
@@ -257,6 +261,7 @@ class AssemblyApp:
                         ft.ListTile(leading=ft.Icon(ft.Icons.SKIP_NEXT, color=ft.Colors.RED), title=ft.Text("Нет товара (Пропустить)"), on_click=self.on_skip),
                         ft.ListTile(leading=ft.Icon(ft.Icons.EDIT, color=ft.Colors.ORANGE), title=ft.Text("Изменить количество"), on_click=self.on_change_qty),
                         ft.ListTile(leading=ft.Icon(ft.Icons.INVENTORY, color=self.COLOR_PRIMARY), title=ft.Text("Следующая коробка"), on_click=self.on_next_box),
+                        ft.ListTile(leading=ft.Icon(ft.Icons.FOLDER, color=ft.Colors.YELLOW), title=ft.Text("Выбрать папку сохранения"), on_click=self.on_select_folder),
                     ],
                     tight=True
                 ),
@@ -463,6 +468,18 @@ class AssemblyApp:
         self.page.snack_bar.open = True
         self.page.update()
 
+    def on_select_folder(self, e):
+        self.bs.open = False
+        self.bs.update()
+        self.folder_picker.get_directory_path()
+
+    def on_folder_picked(self, e: ft.FilePickerResultEvent):
+        if e.path:
+            self.output_directory = e.path
+            self.page.snack_bar = ft.SnackBar(ft.Text(f"Папка сохранения: {e.path}"))
+            self.page.snack_bar.open = True
+            self.page.update()
+
     def on_save_file_picked(self, e: ft.FilePickerResultEvent):
         if e.path:
             try:
@@ -510,7 +527,8 @@ class AssemblyApp:
                 collected_data=collected_data,
                 shipment_info=self.shipment_info,
                 discrepancies=discrepancies,
-                original_file_path=self.input_file_path
+                original_file_path=self.input_file_path,
+                output_directory=self.output_directory
             )
             output_filename = writer.generate_final_file()
             
