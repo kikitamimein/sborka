@@ -30,7 +30,8 @@ class AssemblyApp:
         self.current_box = 1
         self.shipment_info = ""
         self.input_file_path = ""
-        self.output_directory = str(Path.home() / "Downloads")  # Default to Downloads folder
+        self.output_directory = ""  # Will be set by user selection
+        self.output_file_path = ""  # Store the final output file path for sharing
 
         # --- UI Components ---
         self.file_picker = ft.FilePicker(on_result=self.on_file_picked)
@@ -120,12 +121,11 @@ class AssemblyApp:
             ]
             
             self.input_file_path = filepath
-            # Set default output directory to same folder as input file
-            self.output_directory = str(Path(filepath).parent)
             self.current_item_index = 0
             self.current_box = 1
             
-            self.start_assembly()
+            # Show folder selection dialog before starting assembly
+            self.show_folder_selection_dialog()
             
         except Exception as ex:
             self.show_error(f"Ошибка чтения файла: {ex}")
@@ -140,8 +140,13 @@ class AssemblyApp:
             self.current_box = session_data["current_box"]
             self.shipment_info = session_data["shipment_info"]
             self.input_file_path = session_data["input_file_path"]
+            self.output_directory = session_data.get("output_directory", "")
             
-            self.start_assembly()
+            # If no output directory, ask for it
+            if not self.output_directory:
+                self.show_folder_selection_dialog()
+            else:
+                self.start_assembly()
             
         except Exception as ex:
             self.show_error(f"Ошибка загрузки сессии: {ex}")
@@ -165,7 +170,7 @@ class AssemblyApp:
                 ],
                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN
             ),
-            padding=ft.padding.symmetric(horizontal=20, vertical=10),
+            padding=ft.padding.only(left=20, right=20, top=50, bottom=10),  # Extra top padding for mobile status bar
             bgcolor=self.COLOR_SURFACE
         )
 
@@ -418,17 +423,27 @@ class AssemblyApp:
             
             box_val = str(item.get('box', '-'))
             if box_val == '0': box_val = '-'
+            
+            # Extract last 4 digits of barcode
+            barcode = item.get('barcode', '')
+            barcode_last4 = barcode[-4:] if len(barcode) >= 4 else barcode
+            barcode_last4 = barcode_last4.lstrip('.')
 
             rows.append(
                 ft.DataRow(
                     cells=[
                         ft.DataCell(ft.Icon(status_icon, color=status_color)),
-                        # ft.DataCell(ft.Text(item['name'], width=150, no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS)), # Removed as requested
                         ft.DataCell(ft.Text(item.get('location', '-'))),
+                        ft.DataCell(ft.Text(barcode_last4)),  # New barcode column
                         ft.DataCell(ft.Text(str(item['quantity']))),
-                        ft.DataCell(ft.Text(str(item['collected_quantity']), color=status_color, weight=ft.FontWeight.BOLD)),
-                        ft.DataCell(ft.Text(box_val)),
-                        ft.DataCell(ft.IconButton(ft.Icons.EDIT, icon_color=ft.Colors.GREY, on_click=lambda e, idx=i: self.on_change_qty(e, idx))),
+                        ft.DataCell(
+                            ft.Text(str(item['collected_quantity']), color=status_color, weight=ft.FontWeight.BOLD),
+                            on_tap=lambda e, idx=i: self.on_edit_quantity_only(idx)  # Click to edit quantity
+                        ),
+                        ft.DataCell(
+                            ft.Text(box_val),
+                            on_tap=lambda e, idx=i: self.on_edit_box_only(idx)  # Click to edit box
+                        ),
                     ],
                 )
             )
@@ -436,12 +451,11 @@ class AssemblyApp:
         self.review_table = ft.DataTable(
             columns=[
                 ft.DataColumn(ft.Text("Статус")),
-                # ft.DataColumn(ft.Text("Товар")), # Removed
                 ft.DataColumn(ft.Text("Ячейка")),
+                ft.DataColumn(ft.Text("ШК")),  # New barcode column
                 ft.DataColumn(ft.Text("План")),
                 ft.DataColumn(ft.Text("Факт")),
                 ft.DataColumn(ft.Text("Коробка")),
-                ft.DataColumn(ft.Text("Править")),
             ],
             rows=rows,
             column_spacing=10,
@@ -481,6 +495,122 @@ class AssemblyApp:
             self.page.snack_bar = ft.SnackBar(ft.Text(f"Папка сохранения: {e.path}"))
             self.page.snack_bar.open = True
             self.page.update()
+    
+    def show_folder_selection_dialog(self):
+        """Show dialog to select output folder before starting assembly"""
+        def on_select_folder_dialog(e):
+            self.page.close(folder_dialog)
+            self.folder_picker.get_directory_path()
+        
+        def on_folder_selected_for_start(e: ft.FilePickerResultEvent):
+            if e.path:
+                self.output_directory = e.path
+                self.start_assembly()
+            else:
+                # User cancelled, show error and go back to welcome screen
+                self.show_error("Необходимо выбрать папку для сохранения файла")
+                self.init_ui()
+        
+        # Temporarily replace the folder picker callback
+        original_callback = self.folder_picker.on_result
+        self.folder_picker.on_result = on_folder_selected_for_start
+        
+        folder_dialog = ft.AlertDialog(
+            title=ft.Text("Выберите папку для сохранения"),
+            content=ft.Text("Перед началом сборки необходимо выбрать папку, куда будет сохранен итоговый файл."),
+            actions=[
+                ft.TextButton("Выбрать папку", on_click=on_select_folder_dialog),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+        self.page.open(folder_dialog)
+    
+    def on_edit_quantity_only(self, item_index):
+        """Edit only the quantity for an item"""
+        if item_index < 0 or item_index >= len(self.assembly_items):
+            return
+        
+        item = self.assembly_items[item_index]
+        
+        def close_dlg(e):
+            self.page.close(qty_dialog)
+        
+        def save_qty(e):
+            try:
+                new_qty = int(qty_field.value)
+                if new_qty < 0:
+                    raise ValueError
+                
+                item['status'] = 'quantity_changed'
+                item['collected_quantity'] = new_qty
+                
+                self.page.close(qty_dialog)
+                self.build_review_ui()  # Refresh the review table
+            
+            except ValueError:
+                qty_field.error_text = "Введите корректное число"
+                qty_field.update()
+        
+        qty_field = ft.TextField(
+            label="Количество",
+            value=str(item.get('collected_quantity', item['quantity'])),
+            autofocus=True,
+            keyboard_type=ft.KeyboardType.NUMBER
+        )
+        
+        qty_dialog = ft.AlertDialog(
+            title=ft.Text(f"Изменить количество"),
+            content=qty_field,
+            actions=[
+                ft.TextButton("Отмена", on_click=close_dlg),
+                ft.TextButton("Сохранить", on_click=save_qty),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+        self.page.open(qty_dialog)
+    
+    def on_edit_box_only(self, item_index):
+        """Edit only the box number for an item"""
+        if item_index < 0 or item_index >= len(self.assembly_items):
+            return
+        
+        item = self.assembly_items[item_index]
+        
+        def close_dlg(e):
+            self.page.close(box_dialog)
+        
+        def save_box(e):
+            try:
+                new_box = int(box_field.value)
+                if new_box < 1:
+                    raise ValueError
+                
+                item['box'] = new_box
+                
+                self.page.close(box_dialog)
+                self.build_review_ui()  # Refresh the review table
+            
+            except ValueError:
+                box_field.error_text = "Введите корректное число (минимум 1)"
+                box_field.update()
+        
+        box_field = ft.TextField(
+            label="Номер коробки",
+            value=str(item.get('box', self.current_box)),
+            autofocus=True,
+            keyboard_type=ft.KeyboardType.NUMBER
+        )
+        
+        box_dialog = ft.AlertDialog(
+            title=ft.Text(f"Изменить коробку"),
+            content=box_field,
+            actions=[
+                ft.TextButton("Отмена", on_click=close_dlg),
+                ft.TextButton("Сохранить", on_click=save_box),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+        self.page.open(box_dialog)
 
     def on_save_file_picked(self, e: ft.FilePickerResultEvent):
         if e.path:
@@ -491,6 +621,7 @@ class AssemblyApp:
                     "current_box": self.current_box,
                     "shipment_info": self.shipment_info,
                     "input_file_path": self.input_file_path,
+                    "output_directory": self.output_directory,
                 }
                 with open(e.path, "wb") as f:
                     pickle.dump(session_data, f)
@@ -533,14 +664,27 @@ class AssemblyApp:
                 output_directory=self.output_directory
             )
             output_filename = writer.generate_final_file()
+            self.output_file_path = str(Path(output_filename).absolute())  # Store for sharing
             
             self.page.clean()
             
             content = [
                 ft.Icon(ft.Icons.CHECK_CIRCLE, size=100, color=self.COLOR_SUCCESS),
                 ft.Text("Сборка завершена!", size=30, weight=ft.FontWeight.BOLD, color=self.COLOR_TEXT),
-                ft.Text(f"Файл сохранен:\n{Path(output_filename).absolute()}", size=16, color=self.COLOR_TEXT_SEC, text_align=ft.TextAlign.CENTER),
+                ft.Text(f"Файл сохранен:\n{self.output_file_path}", size=16, color=self.COLOR_TEXT_SEC, text_align=ft.TextAlign.CENTER),
                 ft.Container(height=20),
+                ft.ElevatedButton(
+                    "Поделиться файлом",
+                    icon=ft.Icons.SHARE,
+                    style=ft.ButtonStyle(
+                        color=self.COLOR_BG,
+                        bgcolor=self.COLOR_PRIMARY,
+                        padding=20,
+                        shape=ft.RoundedRectangleBorder(radius=10),
+                    ),
+                    on_click=lambda _: self.share_file()
+                ),
+                ft.Container(height=10),
                 ft.ElevatedButton("В главное меню", on_click=lambda _: self.init_ui())
             ]
             
@@ -567,6 +711,16 @@ class AssemblyApp:
         except Exception as e:
             self.show_error(f"Ошибка сохранения: {e}")
 
+    def share_file(self):
+        """Share the output file using platform sharing"""
+        if self.output_file_path:
+            try:
+                self.page.share(self.output_file_path)
+            except Exception as e:
+                self.show_error(f"Ошибка при попытке поделиться файлом: {e}")
+        else:
+            self.show_error("Файл не найден")
+    
     def show_error(self, message):
         self.page.snack_bar = ft.SnackBar(ft.Text(message, color=ft.Colors.WHITE), bgcolor=ft.Colors.RED)
         self.page.snack_bar.open = True
