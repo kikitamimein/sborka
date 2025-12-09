@@ -674,8 +674,8 @@ class AssemblyApp:
                 ft.Text(f"Файл сохранен:\n{self.output_file_path}", size=16, color=self.COLOR_TEXT_SEC, text_align=ft.TextAlign.CENTER),
                 ft.Container(height=20),
                 ft.ElevatedButton(
-                    "Поделиться файлом",
-                    icon=ft.Icons.SHARE,
+                    "Показать расположение файла",
+                    icon=ft.Icons.FOLDER_OPEN,
                     style=ft.ButtonStyle(
                         color=self.COLOR_BG,
                         bgcolor=self.COLOR_PRIMARY,
@@ -712,12 +712,46 @@ class AssemblyApp:
             self.show_error(f"Ошибка сохранения: {e}")
 
     def share_file(self):
-        """Share the output file using platform sharing"""
+        """Show file location and provide copy option since native sharing is not supported"""
         if self.output_file_path:
-            try:
-                self.page.share(self.output_file_path)
-            except Exception as e:
-                self.show_error(f"Ошибка при попытке поделиться файлом: {e}")
+            def close_dlg(e):
+                self.page.close(share_dialog)
+            
+            def copy_path(e):
+                self.page.set_clipboard(self.output_file_path)
+                self.page.snack_bar = ft.SnackBar(ft.Text("Путь скопирован в буфер обмена"))
+                self.page.snack_bar.open = True
+                self.page.update()
+                self.page.close(share_dialog)
+            
+            def open_folder(e):
+                try:
+                    import os
+                    folder_path = str(Path(self.output_file_path).parent)
+                    # Try to open the folder in file manager
+                    self.page.launch_url(f"file://{folder_path}")
+                except Exception as ex:
+                    self.show_error(f"Не удалось открыть папку: {ex}")
+                self.page.close(share_dialog)
+            
+            share_dialog = ft.AlertDialog(
+                title=ft.Text("Файл сохранен"),
+                content=ft.Column(
+                    [
+                        ft.Text("Путь к файлу:", weight=ft.FontWeight.BOLD),
+                        ft.Text(self.output_file_path, size=12, selectable=True),
+                    ],
+                    tight=True,
+                    spacing=10
+                ),
+                actions=[
+                    ft.TextButton("Скопировать путь", on_click=copy_path),
+                    ft.TextButton("Открыть папку", on_click=open_folder),
+                    ft.TextButton("Закрыть", on_click=close_dlg),
+                ],
+                actions_alignment=ft.MainAxisAlignment.END,
+            )
+            self.page.open(share_dialog)
         else:
             self.show_error("Файл не найден")
     
