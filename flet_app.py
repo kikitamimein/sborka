@@ -4,6 +4,7 @@ from excel_processor import ExcelProcessor, ExcelWriter
 import pickle
 from pathlib import Path
 import os
+import json
 
 class AssemblyApp:
     def __init__(self, page: ft.Page):
@@ -32,8 +33,8 @@ class AssemblyApp:
         self.shipment_info = ""
         self.input_file_path = ""
         self.output_directory = ""  # Will be set by user selection
-        self.autosave_path = Path.home() / ".offline_assembler_autosave.assm-save"
         self.output_file_path = ""  # Store the final output file path for sharing
+        self.AUTOSAVE_KEY = "offline_assembler_autosave"  # Key for client_storage
 
         # --- UI Components ---
         self.file_picker = ft.FilePicker(on_result=self.on_file_picked)
@@ -783,20 +784,56 @@ class AssemblyApp:
 
     def share_file_native(self):
         """Share file using native share dialog (Android/iOS)"""
-        if self.output_file_path:
-            try:
-                # Use Flet's native share functionality
-                self.page.share(
-                    title="Файл сборки готов",
-                    text=f"Сборка завершена: {Path(self.output_file_path).name}",
-                    files=[self.output_file_path]
-                )
-            except Exception as ex:
-                # Fallback to showing file location if sharing fails
-                self.show_error(f"Функция 'Поделиться' недоступна: {ex}")
-                self.show_file_location()
-        else:
+        if not self.output_file_path:
             self.show_error("Файл не найден")
+            return
+        
+        # Check if file exists
+        if not os.path.exists(self.output_file_path):
+            self.show_error(f"Файл не существует: {self.output_file_path}")
+            return
+        
+        try:
+            # Use Flet's native share functionality
+            self.page.share(
+                title="Файл сборки готов",
+                text=f"Сборка завершена: {Path(self.output_file_path).name}",
+                files=[self.output_file_path]
+            )
+        except AttributeError as ex:
+            # page.share() doesn't exist in this Flet version
+            self.show_share_error(f"Функция share() недоступна в этой версии Flet.\n\nОшибка: {ex}")
+        except Exception as ex:
+            # Other error - show detailed info
+            self.show_share_error(f"Ошибка при вызове share():\n\n{type(ex).__name__}: {ex}\n\nПуть: {self.output_file_path}")
+    
+    def show_share_error(self, error_message):
+        """Show detailed share error dialog with fallback options"""
+        def close_dlg(e):
+            self.page.close(error_dialog)
+        
+        def show_location(e):
+            self.page.close(error_dialog)
+            self.show_file_location()
+        
+        error_dialog = ft.AlertDialog(
+            title=ft.Text("Ошибка 'Поделиться'"),
+            content=ft.Column(
+                [
+                    ft.Text(error_message, size=12, selectable=True),
+                ],
+                tight=True,
+                scroll=ft.ScrollMode.AUTO,
+                width=300,
+                height=200,
+            ),
+            actions=[
+                ft.TextButton("Показать расположение", on_click=show_location),
+                ft.TextButton("Закрыть", on_click=close_dlg),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+        self.page.open(error_dialog)
     
     def show_file_location(self):
         """Show file location and provide copy option"""
@@ -852,7 +889,7 @@ class AssemblyApp:
         self.page.update()
     
     def autosave_session(self):
-        """Automatically save session to a hidden file"""
+        """Automatically save session to client_storage"""
         try:
             session_data = {
                 "assembly_items": self.assembly_items,
@@ -862,59 +899,61 @@ class AssemblyApp:
                 "input_file_path": self.input_file_path,
                 "output_directory": self.output_directory,
             }
-            with open(self.autosave_path, "wb") as f:
-                pickle.dump(session_data, f)
-        except Exception:
-            pass  # Silent fail for autosave
+            # Serialize to JSON and save to client_storage
+            json_data = json.dumps(session_data, ensure_ascii=False)
+            self.page.client_storage.set(self.AUTOSAVE_KEY, json_data)
+        except Exception as ex:
+            print(f"Autosave error: {ex}")  # Log for debugging
     
     def try_load_autosave(self):
-        """Try to load autosaved session on startup"""
-        if self.autosave_path.exists():
-            try:
-                with open(self.autosave_path, "rb") as f:
-                    session_data = pickle.load(f)
-                
-                self.assembly_items = session_data["assembly_items"]
-                self.current_item_index = session_data["current_item_index"]
-                self.current_box = session_data["current_box"]
-                self.shipment_info = session_data["shipment_info"]
-                self.input_file_path = session_data["input_file_path"]
-                self.output_directory = session_data.get("output_directory", "")
-                
-                # Show dialog to ask if user wants to continue
-                def continue_session(e):
-                    self.page.close(resume_dialog)
-                    if self.output_directory:
-                        self.start_assembly()
-                    else:
-                        self.show_folder_selection_dialog()
-                
-                def start_new(e):
-                    self.page.close(resume_dialog)
-                    self.delete_autosave()
-                    self.assembly_items = []
-                    self.init_ui()
-                
-                resume_dialog = ft.AlertDialog(
-                    title=ft.Text("Восстановить сборку?"),
-                    content=ft.Text("Найдена незавершенная сборка. Продолжить?")
-,
-                    actions=[
-                        ft.TextButton("Начать новую", on_click=start_new),
-                        ft.TextButton("Продолжить", on_click=continue_session),
-                    ],
-                    actions_alignment=ft.MainAxisAlignment.END,
-                )
-                self.page.open(resume_dialog)
-                
-            except Exception:
+        """Try to load autosaved session from client_storage on startup"""
+        try:
+            json_data = self.page.client_storage.get(self.AUTOSAVE_KEY)
+            if not json_data:
+                return  # No autosave found
+            
+            session_data = json.loads(json_data)
+            
+            self.assembly_items = session_data["assembly_items"]
+            self.current_item_index = session_data["current_item_index"]
+            self.current_box = session_data["current_box"]
+            self.shipment_info = session_data["shipment_info"]
+            self.input_file_path = session_data["input_file_path"]
+            self.output_directory = session_data.get("output_directory", "")
+            
+            # Show dialog to ask if user wants to continue
+            def continue_session(e):
+                self.page.close(resume_dialog)
+                if self.output_directory:
+                    self.start_assembly()
+                else:
+                    self.show_folder_selection_dialog()
+            
+            def start_new(e):
+                self.page.close(resume_dialog)
                 self.delete_autosave()
+                self.assembly_items = []
+                self.init_ui()
+            
+            resume_dialog = ft.AlertDialog(
+                title=ft.Text("Восстановить сборку?"),
+                content=ft.Text("Найдена незавершенная сборка. Продолжить?"),
+                actions=[
+                    ft.TextButton("Начать новую", on_click=start_new),
+                    ft.TextButton("Продолжить", on_click=continue_session),
+                ],
+                actions_alignment=ft.MainAxisAlignment.END,
+            )
+            self.page.open(resume_dialog)
+            
+        except Exception as ex:
+            print(f"Load autosave error: {ex}")  # Log for debugging
+            self.delete_autosave()
     
     def delete_autosave(self):
-        """Delete autosave file"""
+        """Delete autosave from client_storage"""
         try:
-            if self.autosave_path.exists():
-                self.autosave_path.unlink()
+            self.page.client_storage.remove(self.AUTOSAVE_KEY)
         except Exception:
             pass
     
